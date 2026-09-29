@@ -1,0 +1,21 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>RecapVox</AssemblyName>
+    <Product>RecapVox</Product>
+    <Version>1.0.1</Version>
+    <Description>Live translation, audio recording and AI summaries</Description>
+    <ApplicationIcon>../../assets/recapvox.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="3.1.0" />
+    <Resource Include="../../assets/recapvox-logo.png" Link="Assets/recapvox-logo.png" />
+  </ItemGroup>
+
+</Project>

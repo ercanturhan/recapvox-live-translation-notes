@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="3.1.0" />
+    <Compile Include="../../src/Translator.Desktop/WaveRecorder.cs" Link="WaveRecorder.cs" />
+    <Compile Include="../../src/Translator.Desktop/WaveFile.cs" Link="WaveFile.cs" />
+    <Compile Include="../../src/Translator.Desktop/ApplicationAudioCapture.cs" Link="ApplicationAudioCapture.cs" />
+    <Compile Include="../../src/Translator.Desktop/TranscriptAssembler.cs" Link="TranscriptAssembler.cs" />
+    <Compile Include="../../src/Translator.Desktop/SummaryClient.cs" Link="SummaryClient.cs" />
+    <Compile Include="../../src/Translator.Desktop/CredentialStore.cs" Link="CredentialStore.cs" />
+    <Compile Include="../../src/Translator.Desktop/ArchiveStore.cs" Link="ArchiveStore.cs" />
+    <Compile Include="../../src/Translator.Desktop/HybridTranslator.cs" Link="HybridTranslator.cs" />
+    <Compile Include="../../src/Translator.Desktop/ILiveSession.cs" Link="ILiveSession.cs" />
+    <Compile Include="../../src/Translator.Desktop/StreamingTranscript.cs" Link="StreamingTranscript.cs" />
+    <Compile Include="../../src/Translator.Desktop/Pcm16Upsampler.cs" Link="Pcm16Upsampler.cs" />
+    <Compile Include="../../src/Translator.Desktop/RealtimeWebSocketSession.cs" Link="RealtimeWebSocketSession.cs" />
+    <Compile Include="../../src/Translator.Desktop/OpenAiTranslationSession.cs" Link="OpenAiTranslationSession.cs" />
+    <Compile Include="../../src/Translator.Desktop/GeminiTranslationSession.cs" Link="GeminiTranslationSession.cs" />
+    <Compile Include="../../src/Translator.Desktop/SonioxSession.cs" Link="SonioxSession.cs" />
+    <Compile Include="../../src/Translator.Desktop/LanguageCatalog.cs" Link="LanguageCatalog.cs" />
+    <Compile Include="../../src/Translator.Desktop/Pcm16AudioMixer.cs" Link="Pcm16AudioMixer.cs" />
+    <Compile Include="../../src/Translator.Desktop/OverlayText.cs" Link="OverlayText.cs" />
+    <Compile Include="../../src/Translator.Desktop/PdfExporter.cs" Link="PdfExporter.cs" />
+    <Compile Include="../../src/Translator.Desktop/UiLocalizer.cs" Link="UiLocalizer.cs" />
+    <Compile Include="../../src/Translator.Desktop/BillingClient.cs" Link="BillingClient.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,5 @@
+Hello. My name is Alex.
+Today I am testing the Translator application.
+I will open the blue box and look for a small plant.
+The meeting starts at nine thirty in the morning.
+Please translate these sentences into Turkish.

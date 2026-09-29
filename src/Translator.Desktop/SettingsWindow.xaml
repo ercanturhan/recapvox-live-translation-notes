@@ -1,0 +1,49 @@
+<Window x:Class="Translator.Desktop.SettingsWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="RecapVox · Ayarlar" Width="650" Height="680" MinWidth="580" MinHeight="510" WindowStartupLocation="CenterOwner" Background="#F3F6FC" Closing="Window_Closing">
+ <Window.Resources>
+  <Style TargetType="Button"><Setter Property="Padding" Value="12,7"/><Setter Property="Margin" Value="0,0,8,0"/><Setter Property="Background" Value="#DCE9F9"/><Setter Property="BorderBrush" Value="#B9D0EA"/></Style>
+  <Style TargetType="TextBlock"><Setter Property="Foreground" Value="#20324F"/></Style>
+ </Window.Resources>
+ <Grid><Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+ <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto"><StackPanel Margin="24,24,24,12">
+  <TextBlock Text="Ayarlar" FontSize="25" FontWeight="Bold" Margin="0,0,0,15"/>
+  <Border Background="White" CornerRadius="10" Padding="17" Margin="0,0,0,13"><WrapPanel><TextBlock Text="Program dili" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,15,0"/><ComboBox x:Name="UiLanguageBox" Width="160" SelectionChanged="UiLanguage_SelectionChanged"><ComboBoxItem Content="Türkçe" Tag="tr"/><ComboBoxItem Content="İngilizce" Tag="en"/><ComboBoxItem Content="Almanca" Tag="de"/><ComboBoxItem Content="İspanyolca" Tag="es"/></ComboBox></WrapPanel></Border>
+  <Border Background="White" CornerRadius="10" Padding="17" Margin="0,0,0,13"><StackPanel>
+   <TextBlock Text="Canlı çeviri" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,7"/>
+   <WrapPanel Margin="0,0,0,8"><TextBlock Text="Yöntem" VerticalAlignment="Center" Margin="0,0,8,0"/><ComboBox x:Name="LiveProviderBox" Width="285" SelectionChanged="LiveProvider_SelectionChanged"><ComboBoxItem Content="Soniox Real-Time Speech" Tag="Soniox"/><ComboBoxItem Content="Soniox + DeepSeek"/><ComboBoxItem Content="OpenAI GPT-Realtime-Translate"/><ComboBoxItem Content="Gemini 3.5 Live Translate"/></ComboBox></WrapPanel>
+   <StackPanel x:Name="SingleLivePanel">
+    <TextBlock x:Name="LiveKeyLabel" Text="Canlı API anahtarı"/>
+    <PasswordBox x:Name="LiveKeyBox" Height="30" Margin="0,5,0,9"/>
+    <WrapPanel><Button Content="Anahtarı kaydet" Click="SaveLiveKey_Click"/><Button x:Name="LiveTestButton" Content="Bağlantıyı dene" Click="TestLive_Click"/><Button Content="Anahtar sayfası" Click="LiveKeyPage_Click"/></WrapPanel>
+   </StackPanel>
+   <StackPanel x:Name="HybridPanel" Visibility="Collapsed">
+    <Border Background="#F3F8FE" BorderBrush="#D4E3F4" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,10"><StackPanel>
+     <TextBlock Text="1 · Soniox — konuşmayı yazıya döker" FontWeight="SemiBold" Margin="0,0,0,7"/>
+     <TextBlock Text="Soniox API anahtarı"/>
+     <PasswordBox x:Name="HybridSonioxKeyBox" Height="30" Margin="0,5,0,9"/>
+     <WrapPanel><Button Content="Soniox kaydet" Click="SaveHybridSoniox_Click"/><Button x:Name="HybridSonioxTestButton" Content="Soniox dene" Click="TestHybridSoniox_Click"/><Button Content="Soniox anahtar sayfası" Click="SonioxKeyPage_Click"/></WrapPanel>
+    </StackPanel></Border>
+    <Border Background="#F7F5FE" BorderBrush="#E1DCF7" BorderThickness="1" CornerRadius="8" Padding="12"><StackPanel>
+     <TextBlock Text="2 · DeepSeek — yazıya dökülen cümleleri çevirir" FontWeight="SemiBold" Margin="0,0,0,7"/>
+     <TextBlock Text="Canlı DeepSeek API anahtarı"/>
+     <PasswordBox x:Name="HybridDeepSeekKeyBox" Height="30" Margin="0,5,0,9"/>
+     <WrapPanel><Button Content="DeepSeek kaydet" Click="SaveHybridDeepSeek_Click"/><Button x:Name="HybridDeepSeekTestButton" Content="DeepSeek dene" Click="TestHybridDeepSeek_Click"/><Button Content="DeepSeek anahtar sayfası" Click="DeepSeekKeyPage_Click"/></WrapPanel>
+    </StackPanel></Border>
+   </StackPanel>
+   <TextBlock x:Name="LiveHintText" Foreground="#58718C" TextWrapping="Wrap" Margin="0,10,0,0"/>
+  </StackPanel></Border>
+  <Border Background="White" CornerRadius="10" Padding="17" Margin="0,0,0,13"><StackPanel>
+   <TextBlock Text="Özetleyici" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,9"/>
+   <WrapPanel Margin="0,0,0,8"><TextBlock Text="Sağlayıcı" VerticalAlignment="Center" Margin="0,0,8,0"/><ComboBox x:Name="ProviderBox" Width="125" SelectionChanged="Provider_SelectionChanged" Margin="0,0,14,0"><ComboBoxItem Content="DeepSeek"/><ComboBoxItem Content="OpenAI"/><ComboBoxItem Content="Gemini"/><ComboBoxItem Content="Claude"/></ComboBox><TextBlock Text="Model" VerticalAlignment="Center" Margin="0,0,8,0"/><TextBox x:Name="ModelBox" Width="200"/></WrapPanel>
+   <TextBlock Text="API anahtarı"/><PasswordBox x:Name="SummaryKeyBox" Height="30" Margin="0,5,0,9"/>
+   <WrapPanel><Button Content="Anahtarı kaydet" Click="SaveSummary_Click"/><Button x:Name="SummaryTestButton" Content="Bağlantıyı dene" Click="TestSummary_Click"/><Button Content="Anahtar sayfası" Click="SummaryPage_Click"/></WrapPanel>
+  </StackPanel></Border>
+  <Border Background="White" CornerRadius="10" Padding="17"><StackPanel>
+   <TextBlock Text="Kayıt konumu" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,8"/>
+   <TextBox x:Name="ArchivePathBox" Height="30" Margin="0,0,0,8"/>
+   <WrapPanel><Button Content="Klasör seç" Click="Browse_Click"/></WrapPanel>
+  </StackPanel></Border>
+  <TextBlock x:Name="FeedbackText" TextWrapping="Wrap" Foreground="#2263A3" Margin="0,12,0,0"/>
+ </StackPanel></ScrollViewer>
+ <Border Grid.Row="1" Background="White" BorderBrush="#DCE6F0" BorderThickness="0,1,0,0" Padding="16,12" ><Button x:Name="ApplyButton" Content="Kaydet ve uygula" Click="SaveSettings_Click" HorizontalAlignment="Right" MinWidth="160" Background="#1875C2" Foreground="White"/></Border>
+ </Grid>
+</Window>
