@@ -51,6 +51,7 @@ public partial class MainWindow : Window
         RefreshHistory();
         UiLocalizer.Apply(this);
         StatusText.Text = UiLocalizer.T("Hazır. Kaynağı seçip başlatabilirsiniz.");
+        SummaryDateText.Text = UiLocalizer.T("Henüz özet yok");
         _billingTimer.Tick += async (_, _) => await RefreshBalancesAsync();
         _billingTimer.Start();
         _ = RefreshBalancesAsync();

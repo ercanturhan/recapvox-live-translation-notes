@@ -12,7 +12,7 @@ RecapVox listens to your microphone, a selected Windows application's audio, or 
 
 ## Download and start
 
-Download **RecapVox-win-x64-1.0.1.exe** from the [v1.0.1 release](https://github.com/ercanturhan/recapvox-live-translation-notes/releases/tag/v1.0.1) and double-click it. No separate .NET installation is needed. On first launch, the launcher extracts its private runtime to `%LOCALAPPDATA%\RecapVox\R`; later launches reuse that cache. An internet connection and your own provider API key are required for live translation and AI summaries. The EXE is currently unsigned, so Windows may show a publisher warning.
+Download **RecapVox-win-x64-1.0.2.exe** from the [v1.0.2 release](https://github.com/ercanturhan/recapvox-live-translation-notes/releases/tag/v1.0.2) and double-click it. No separate .NET installation is needed. On first launch, the launcher extracts its private runtime to `%LOCALAPPDATA%\RecapVox\R`; later launches reuse that cache. An internet connection and your own provider API key are required for live translation and AI summaries. The EXE is currently unsigned, so Windows may show a publisher warning.
 
 The download contains no API keys, recordings, or personal settings. Keys are stored in Windows Credential Manager for your Windows account. Moving the EXE to another folder on the **same** account does not remove existing keys; sharing the EXE does not share your keys.
 
@@ -68,7 +68,7 @@ Install the stable [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dot
 ```powershell
 ./run.ps1
 # Build a single-file distribution:
-./scripts/package-single-exe.ps1 -Version 1.0.1
+./scripts/package-single-exe.ps1 -Version 1.0.2
 # Run automated checks:
 ./.dotnet-sdk/dotnet.exe run --project tests/Translator.AudioChecks/Translator.AudioChecks.csproj
 ```
