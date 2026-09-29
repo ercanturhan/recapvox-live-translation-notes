@@ -17,10 +17,14 @@ internal sealed class SonioxSession : ILiveSession
     private readonly TranscriptAssembler _transcript = new();
     private Task? _sendTask;
     private Task? _receiveTask;
+    private readonly SemaphoreSlim _sendGate = new(1, 1);
+    private CancellationTokenSource? _pauseCancellation;
+    private Task? _keepaliveTask;
 
     public event Action<IReadOnlyList<TranscriptSegment>>? TextChanged;
     public event Action<string>? Failed;
     public int CommittedOriginalCount => _transcript.CommittedOriginalCount;
+    public bool IsConnected => _socket.State == WebSocketState.Open && _receiveTask?.IsCompleted == false && _sendTask?.IsCompleted == false;
 
     public Task ConnectAsync(string key, string targetLanguage, string? sourceLanguage, CancellationToken cancellation) =>
         ConnectAsync(key, targetLanguage, sourceLanguage, cancellation, true);
@@ -47,16 +51,56 @@ internal sealed class SonioxSession : ILiveSession
         _receiveTask = ReceiveLoopAsync();
     }
 
-    public bool TryQueueAudio(byte[] data) => _audio.Writer.TryWrite(data);
+    public bool TryQueueAudio(byte[] data) => IsConnected && _audio.Writer.TryWrite(data);
+
+    public async Task SetPausedAsync(bool paused)
+    {
+        if (paused)
+        {
+            if (_pauseCancellation is not null) return;
+            if (!IsConnected) throw new InvalidOperationException("Soniox bağlantısı kapandı.");
+            _pauseCancellation = new CancellationTokenSource();
+            _keepaliveTask = KeepaliveLoopAsync(_pauseCancellation.Token);
+        }
+        else if (_pauseCancellation is not null)
+        {
+            _pauseCancellation.Cancel();
+            if (_keepaliveTask is not null) await _keepaliveTask;
+            _pauseCancellation.Dispose();
+            _pauseCancellation = null;
+            _keepaliveTask = null;
+        }
+    }
+
+    private async Task KeepaliveLoopAsync(CancellationToken cancellation)
+    {
+        try
+        {
+            while (!cancellation.IsCancellationRequested)
+            {
+                await SendAsync(Encoding.UTF8.GetBytes("{\"type\":\"keepalive\"}"), WebSocketMessageType.Text, cancellation);
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellation);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex) { Failed?.Invoke(ex.Message); }
+    }
+
+    private async Task SendAsync(ReadOnlyMemory<byte> data, WebSocketMessageType type, CancellationToken cancellation)
+    {
+        await _sendGate.WaitAsync(cancellation);
+        try { await _socket.SendAsync(data, type, true, cancellation); }
+        finally { _sendGate.Release(); }
+    }
 
     private async Task SendLoopAsync()
     {
         try
         {
             await foreach (var data in _audio.Reader.ReadAllAsync())
-                await _socket.SendAsync(data, WebSocketMessageType.Binary, true, CancellationToken.None);
+                await SendAsync(data, WebSocketMessageType.Binary, CancellationToken.None);
             if (_socket.State == WebSocketState.Open)
-                await _socket.SendAsync(ReadOnlyMemory<byte>.Empty, WebSocketMessageType.Text, true, CancellationToken.None);
+                await SendAsync(ReadOnlyMemory<byte>.Empty, WebSocketMessageType.Text, CancellationToken.None);
         }
         catch (Exception ex) { Failed?.Invoke(ex.Message); }
     }
@@ -95,6 +139,7 @@ internal sealed class SonioxSession : ILiveSession
 
     public async Task StopAsync()
     {
+        await SetPausedAsync(false);
         _audio.Writer.TryComplete();
         if (_sendTask is not null) await _sendTask;
         if (_receiveTask is not null)
@@ -106,5 +151,6 @@ internal sealed class SonioxSession : ILiveSession
         _transcript.Finish();
         TextChanged?.Invoke(_transcript.Segments);
         _socket.Dispose();
+        _sendGate.Dispose();
     }
 }

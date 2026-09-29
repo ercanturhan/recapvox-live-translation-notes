@@ -8,8 +8,8 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>RecapVox</AssemblyName>
     <Product>RecapVox</Product>
-    <Version>1.0.2</Version>
-    <Description>Live translation, audio recording and AI summaries</Description>
+    <Version>1.1.0</Version>
+    <Description>Live translation, transcription, audio recording and AI summaries</Description>
     <ApplicationIcon>../../assets/recapvox.ico</ApplicationIcon>
   </PropertyGroup>
 

@@ -75,8 +75,8 @@ public partial class HistoryWindow : Window
         var lines = new List<string>
         {
             $"{record.StartedAt.LocalDateTime:dd.MM.yyyy HH:mm:ss} – {record.EndedAt?.LocalDateTime.ToString("dd.MM.yyyy HH:mm:ss") ?? UiLocalizer.T("Devam ediyor")}",
-            record.Source, $"{record.SourceLanguage} → {record.TargetLanguage}",
-            UiLocalizer.T("Canlı çeviri maliyeti") + ": " + (record.LiveCostUsd is { } liveCost
+            record.Source, record.TranscriptionOnly ? UiLocalizer.T("Transkripsiyon") + " · " + record.SourceLanguage : $"{record.SourceLanguage} → {record.TargetLanguage}",
+            UiLocalizer.T(record.TranscriptionOnly ? "Transkripsiyon maliyeti" : "Canlı çeviri maliyeti") + ": " + (record.LiveCostUsd is { } liveCost
                 ? $"${liveCost:0.000000} USD · {UiLocalizer.T(record.LiveCostStatus)}"
                 : string.IsNullOrWhiteSpace(record.LiveCostStatus) ? UiLocalizer.T("Bilinmiyor") : UiLocalizer.T(record.LiveCostStatus)),
             record.LiveProvider == LiveProviders.Hybrid ? "DeepSeek: " + (record.HybridCostEstimateUsd is { } hybridCost
@@ -93,7 +93,7 @@ public partial class HistoryWindow : Window
         {
             var time = segment.Start is null ? "--:--" : $"{(int)segment.Start.Value.TotalMinutes:00}:{segment.Start.Value.Seconds:00}";
             lines.Add((ShowTimeBox?.IsChecked == true ? $"[{time}] " : "") + segment.Original);
-            lines.Add(segment.Translation);
+            if (!record.TranscriptionOnly) lines.Add(segment.Translation);
             lines.Add("");
         }
         DetailBox.Text = string.Join("\n", lines);
@@ -197,8 +197,14 @@ public partial class HistoryWindow : Window
                 foreach (var segment in record.Segments)
                 {
                     var stamp = segment.Start is null ? "--:--" : $"{(int)segment.Start.Value.TotalMinutes:00}:{segment.Start.Value.Seconds:00}";
-                    markdown.Append($"### {stamp}\n\n**{UiLocalizer.T("Orijinal")}:** {segment.Original}\n\n**{UiLocalizer.T("Çeviri")}:** {segment.Translation}\n\n");
-                    plain.Append($"[{stamp}] {segment.Original}\n{segment.Translation}\n\n");
+                    markdown.Append($"### {stamp}\n\n**{UiLocalizer.T("Orijinal")}:** {segment.Original}\n\n");
+                    plain.Append($"[{stamp}] {segment.Original}\n");
+                    if (!record.TranscriptionOnly)
+                    {
+                        markdown.Append($"**{UiLocalizer.T("Çeviri")}:** {segment.Translation}\n\n");
+                        plain.Append(segment.Translation + "\n");
+                    }
+                    plain.Append('\n');
                 }
             if (mode is "summary" or "both")
                 foreach (var summary in record.Summaries)

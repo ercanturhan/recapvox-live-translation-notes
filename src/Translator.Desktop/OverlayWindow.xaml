@@ -1,8 +1,8 @@
 <Window x:Class="Translator.Desktop.OverlayWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Yüzen altyazı" Width="760" Height="120" MinWidth="420" Topmost="True" WindowStyle="None" AllowsTransparency="True" Background="Transparent" ResizeMode="NoResize" MouseLeftButtonDown="Window_Drag">
  <Border Background="#F0162234" CornerRadius="12" Padding="18" BorderBrush="#507CA6" BorderThickness="1">
-  <Grid x:Name="SubtitleGrid">
-   <TextBlock x:Name="OriginalLine" Foreground="#D5E5F7" TextWrapping="Wrap" VerticalAlignment="Center"/>
-   <TextBlock x:Name="TranslatedLine" Foreground="White" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Center"/>
+  <Grid x:Name="SubtitleGrid" ClipToBounds="True">
+   <TextBlock x:Name="OriginalLine" Foreground="#D5E5F7" TextWrapping="Wrap" VerticalAlignment="Bottom"/>
+   <TextBlock x:Name="TranslatedLine" Foreground="White" FontWeight="SemiBold" TextWrapping="Wrap" VerticalAlignment="Bottom"/>
   </Grid>
  </Border>
 </Window>

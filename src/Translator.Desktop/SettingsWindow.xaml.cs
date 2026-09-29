@@ -129,8 +129,13 @@ public partial class SettingsWindow : Window
             var provider = LiveProviders.CredentialProvider(selected);
             var key = Required(LiveKeyBox.Password, provider + " anahtarı");
             using var cancel = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            var session = LiveProviders.Create(selected);
-            try { await session.ConnectAsync(key, "tr", "en", cancel.Token); }
+            var session = _settings.TranscriptionOnly ? LiveProviders.CreateTranscription(selected) : LiveProviders.Create(selected);
+            try
+            {
+                if (session is SonioxSession soniox)
+                    await soniox.ConnectAsync(key, "tr", "en", cancel.Token, !_settings.TranscriptionOnly);
+                else await session.ConnectAsync(key, "tr", "en", cancel.Token);
+            }
             finally { await session.StopAsync(); }
             FeedbackText.Text = selected + ": " + UiLocalizer.T("bağlantı başarılı; deneme kullanıma yazılabilir.");
         }

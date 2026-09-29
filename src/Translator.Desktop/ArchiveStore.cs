@@ -9,6 +9,7 @@ internal sealed class AppSettings
     public string SummaryProvider { get; set; } = "DeepSeek";
     public string SummaryModel { get; set; } = SummaryClient.DefaultModel("DeepSeek");
     public string LiveProvider { get; set; } = "Soniox";
+    public bool TranscriptionOnly { get; set; }
     public string SourceLanguageCode { get; set; } = "en";
     public string TargetLanguageCode { get; set; } = "tr";
     public string SummaryLanguageCode { get; set; } = "tr";
@@ -47,6 +48,7 @@ internal sealed class SessionRecord
     public string SourceLanguage { get; set; } = "";
     public string TargetLanguage { get; set; } = "";
     public string LiveProvider { get; set; } = "Soniox";
+    public bool TranscriptionOnly { get; set; }
     public string? AudioFile { get; set; }
     public List<TranscriptSegment> Segments { get; set; } = [];
     public List<SummaryRecord> Summaries { get; set; } = [];
@@ -55,7 +57,8 @@ internal sealed class SessionRecord
     public string LiveCostStatus { get; set; } = "";
     public string DisplayName => $"{StartedAt.LocalDateTime:dd.MM.yyyy HH:mm} · " +
         (string.IsNullOrWhiteSpace(Title) ? Source : Title) +
-        $" · {Segments.Count} {UiLocalizer.T("blok")}" + (Summaries.Count > 0 ? " · 📝 " + UiLocalizer.T("Özet var") : "") +
+        $" · {Segments.Count} {UiLocalizer.T("blok")}" + (TranscriptionOnly ? " · " + UiLocalizer.T("Transkripsiyon") : "") +
+        (Summaries.Count > 0 ? " · 📝 " + UiLocalizer.T("Özet var") : "") +
         (LiveCostUsd is { } cost ? $" · ${cost:0.0000}" : "");
 }
 

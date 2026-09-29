@@ -21,7 +21,9 @@
     <Compile Include="../../src/Translator.Desktop/Pcm16Upsampler.cs" Link="Pcm16Upsampler.cs" />
     <Compile Include="../../src/Translator.Desktop/RealtimeWebSocketSession.cs" Link="RealtimeWebSocketSession.cs" />
     <Compile Include="../../src/Translator.Desktop/OpenAiTranslationSession.cs" Link="OpenAiTranslationSession.cs" />
+    <Compile Include="../../src/Translator.Desktop/OpenAiTranscriptionSession.cs" Link="OpenAiTranscriptionSession.cs" />
     <Compile Include="../../src/Translator.Desktop/GeminiTranslationSession.cs" Link="GeminiTranslationSession.cs" />
+    <Compile Include="../../src/Translator.Desktop/GeminiTranscriptionSession.cs" Link="GeminiTranscriptionSession.cs" />
     <Compile Include="../../src/Translator.Desktop/SonioxSession.cs" Link="SonioxSession.cs" />
     <Compile Include="../../src/Translator.Desktop/LanguageCatalog.cs" Link="LanguageCatalog.cs" />
     <Compile Include="../../src/Translator.Desktop/Pcm16AudioMixer.cs" Link="Pcm16AudioMixer.cs" />

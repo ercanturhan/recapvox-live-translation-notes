@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media.Animation;
 using System.Windows.Threading;
 
 namespace Translator.Desktop;
@@ -19,6 +20,8 @@ public partial class MainWindow : Window
     private OverlayWindow? _overlay;
     private IReadOnlyList<TranscriptSegment> _segments = [];
     private IReadOnlyList<TranscriptSegment> _sonioxSegments = [];
+    private IReadOnlyList<TranscriptSegment> _sessionPrefix = [];
+    private TimeSpan _sessionStartOffset;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> _hybridResults = new();
     private HybridTranslator? _hybrid;
     private readonly AppSettings _settings;
@@ -30,15 +33,27 @@ public partial class MainWindow : Window
     private bool _billingBusy;
     private volatile bool _paused;
     private bool _stopping;
+    private bool _recordingReady;
+    private bool _reconnecting;
+    private bool _applicationCaptureStopped;
+    private int _consecutiveRecoveries;
+    private string _lastLiveError = "";
+    private DateTimeOffset? _pausedAt;
     private IReadOnlyList<SessionRecord> _history = [];
     private bool _initializing = true;
 
     public MainWindow()
     {
         InitializeComponent();
-        _recordTimer.Tick += (_, _) => RecordTimerText.Text = (_paused ? "⏸ " : "● ") + _recordClock.Elapsed.ToString(@"hh\:mm\:ss");
+        _recordTimer.Tick += async (_, _) =>
+        {
+            RecordTimerText.Text = (_paused ? "⏸ " : "● ") + _recordClock.Elapsed.ToString(@"hh\:mm\:ss");
+            if (_session is { IsConnected: false } && !_paused && !_stopping && !_reconnecting)
+                await RecoverStreamAsync();
+        };
         _settings = ArchiveStore.LoadSettings();
         UiLocalizer.Language = _settings.UiLanguage;
+        ModeBox.SelectedIndex = _settings.TranscriptionOnly ? 1 : 0;
         RefreshLanguages();
         TimeBox.IsChecked = _settings.ShowTimestamps;
         OverlayBox.IsChecked = _settings.ShowOverlay;
@@ -50,6 +65,7 @@ public partial class MainWindow : Window
         RefreshProviderLabels();
         RefreshHistory();
         UiLocalizer.Apply(this);
+        ApplyModeUi();
         StatusText.Text = UiLocalizer.T("Hazır. Kaynağı seçip başlatabilirsiniz.");
         SummaryDateText.Text = UiLocalizer.T("Henüz özet yok");
         _billingTimer.Tick += async (_, _) => await RefreshBalancesAsync();
@@ -79,6 +95,7 @@ public partial class MainWindow : Window
         UpdateSourceInfo();
         RefreshHistory();
         _historyWindow?.ApplyLanguage();
+        ApplyModeUi();
     }
 
     private void History_Click(object sender, RoutedEventArgs e)
@@ -94,8 +111,39 @@ public partial class MainWindow : Window
 
     private void RefreshProviderLabels()
     {
-        LiveProviderText.Text = UiLocalizer.T("Canlı çeviri") + ": " + (_settings.LiveProvider == LiveProviders.Soniox ? "Soniox Real-Time Speech" : _settings.LiveProvider);
+        LiveProviderText.Text = UiLocalizer.T(_settings.TranscriptionOnly ? "Transkripsiyon" : "Canlı çeviri") + ": " + EffectiveProviderName();
         SummaryProviderText.Text = UiLocalizer.T("Özetleyici") + ": " + _settings.SummaryProvider + " · " + _settings.SummaryModel;
+    }
+
+    private string EffectiveProviderName() => (_settings.LiveProvider, _settings.TranscriptionOnly) switch
+    {
+        (LiveProviders.Hybrid, true) => "Soniox Real-Time Speech",
+        (LiveProviders.OpenAi, true) => "OpenAI GPT-Live-Transcribe",
+        (LiveProviders.Gemini, true) => "Gemini 3.5 Transcribe Live",
+        (LiveProviders.Soniox, _) => "Soniox Real-Time Speech",
+        _ => _settings.LiveProvider
+    };
+
+    private void Mode_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_settings is null || _initializing) return;
+        _settings.TranscriptionOnly = ModeBox.SelectedIndex == 1;
+        ArchiveStore.SaveSettings(_settings);
+        ApplyModeUi();
+        RefreshLanguages();
+        _ = RefreshBalancesAsync();
+    }
+
+    private void ApplyModeUi()
+    {
+        TargetLanguagePanel.Visibility = _settings.TranscriptionOnly ? Visibility.Collapsed : Visibility.Visible;
+        TargetLanguageColumn.Width = _settings.TranscriptionOnly ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        TranscriptHeading.Text = UiLocalizer.T(_settings.TranscriptionOnly ? "Konuşma metni" : "Konuşma ve çeviri");
+        ModeProviderHint.Text = EffectiveProviderName();
+        RefreshProviderLabels();
+        RefreshTranscript();
+        _overlay?.ApplySettings(_settings);
+        _overlay?.UpdateSegments(_segments);
     }
 
     private async void RefreshBalances_Click(object sender, RoutedEventArgs e) => await RefreshBalancesAsync();
@@ -105,8 +153,9 @@ public partial class MainWindow : Window
         if (_billingBusy) return;
         _billingBusy = true;
         var live = _settings.LiveProvider;
+        var transcriptionOnly = _settings.TranscriptionOnly;
         var summary = _settings.SummaryProvider;
-        LiveBalanceText.Text = UiLocalizer.T("Canlı bakiye") + ": " + UiLocalizer.T("Sorgulanıyor…");
+        LiveBalanceText.Text = UiLocalizer.T(transcriptionOnly ? "Transkripsiyon bakiyesi" : "Canlı bakiye") + ": " + UiLocalizer.T("Sorgulanıyor…");
         SummaryBalanceText.Text = UiLocalizer.T("Özet bakiyesi") + ": " + UiLocalizer.T("Sorgulanıyor…");
         try
         {
@@ -116,11 +165,11 @@ public partial class MainWindow : Window
                 try { return await BillingClient.DeepSeekBalanceAsync(key, CancellationToken.None); }
                 catch { return UiLocalizer.T("Bakiye alınamadı"); }
             }
-            var liveDeepSeekBalance = live == LiveProviders.Hybrid ? await ReadDeepSeekAsync(CredentialStore.ReadLiveDeepSeek()) : null;
+            var liveDeepSeekBalance = live == LiveProviders.Hybrid && !transcriptionOnly ? await ReadDeepSeekAsync(CredentialStore.ReadLiveDeepSeek()) : null;
             var summaryDeepSeekBalance = summary == "DeepSeek" ? await ReadDeepSeekAsync(CredentialStore.ReadForProvider("DeepSeek")) : null;
-            if (live != _settings.LiveProvider || summary != _settings.SummaryProvider) return;
-            LiveBalanceText.Text = UiLocalizer.T("Canlı bakiye") + ": " +
-                (live == LiveProviders.Hybrid ? "Soniox: " + UiLocalizer.T("API'den alınamıyor") + " · DeepSeek: " + liveDeepSeekBalance
+            if (live != _settings.LiveProvider || summary != _settings.SummaryProvider || transcriptionOnly != _settings.TranscriptionOnly) return;
+            LiveBalanceText.Text = UiLocalizer.T(transcriptionOnly ? "Transkripsiyon bakiyesi" : "Canlı bakiye") + ": " +
+                (live == LiveProviders.Hybrid && !transcriptionOnly ? "Soniox: " + UiLocalizer.T("API'den alınamıyor") + " · DeepSeek: " + liveDeepSeekBalance
                 : UiLocalizer.T("API'den alınamıyor"));
             SummaryBalanceText.Text = UiLocalizer.T("Özet bakiyesi") + ": " +
                 (summary == "DeepSeek" ? summaryDeepSeekBalance : UiLocalizer.T("API'den alınamıyor"));
@@ -134,7 +183,7 @@ public partial class MainWindow : Window
         SetLanguageOptions(SourceLanguageBox, LanguageCatalog.Live(_settings.LiveProvider, true), _settings.SourceLanguageCode, "");
         SetLanguageOptions(LanguageBox, LanguageCatalog.Live(_settings.LiveProvider, false), _settings.TargetLanguageCode, "tr", _settings.LiveProvider == LiveProviders.OpenAi);
         SetLanguageOptions(SummaryLanguageBox, LanguageCatalog.Summary(), _settings.SummaryLanguageCode, "tr", true);
-        if (_settings.LiveProvider is LiveProviders.OpenAi or LiveProviders.Gemini)
+        if (!_settings.TranscriptionOnly && _settings.LiveProvider is LiveProviders.OpenAi or LiveProviders.Gemini)
         {
             SourceLanguageBox.SelectedItem = LanguageCatalog.Find(SourceLanguageBox.Items.OfType<LanguageOption>(), "");
             SourceLanguageBox.IsEnabled = false;
@@ -251,13 +300,14 @@ public partial class MainWindow : Window
         try
         {
             var liveProvider = _settings.LiveProvider;
+            var transcriptionOnly = _settings.TranscriptionOnly;
             var credentialProvider = LiveProviders.CredentialProvider(liveProvider);
             var key = liveProvider is LiveProviders.Soniox or LiveProviders.Hybrid
                 ? CredentialStore.Read() ?? ""
                 : CredentialStore.ReadForProvider(credentialProvider) ?? "";
             if (key.Length == 0) throw new InvalidOperationException(liveProvider + " API anahtarını Ayarlar bölümüne girin.");
-            var hybridKey = liveProvider == LiveProviders.Hybrid ? CredentialStore.ReadLiveDeepSeek() : null;
-            if (liveProvider == LiveProviders.Hybrid && string.IsNullOrWhiteSpace(hybridKey))
+            var hybridKey = liveProvider == LiveProviders.Hybrid && !transcriptionOnly ? CredentialStore.ReadLiveDeepSeek() : null;
+            if (liveProvider == LiveProviders.Hybrid && !transcriptionOnly && string.IsNullOrWhiteSpace(hybridKey))
                 throw new InvalidOperationException(UiLocalizer.T("Hibrit canlı çeviri için DeepSeek anahtarını Ayarlar bölümüne girin."));
             string? wavPath = null;
             string? recordPath = null;
@@ -282,7 +332,13 @@ public partial class MainWindow : Window
                 recordPath = Path.Combine(_settings.ArchiveDirectory, $"translator-ses-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.wav");
             }
             _segments = [];
+            _recordingReady = false;
             _sonioxSegments = [];
+            _sessionPrefix = [];
+            _sessionStartOffset = TimeSpan.Zero;
+            _applicationCaptureStopped = false;
+            _consecutiveRecoveries = 0;
+            _lastLiveError = "";
             _hybridResults.Clear();
             _currentRecord = null;
             TranscriptList.ItemsSource = null;
@@ -295,7 +351,7 @@ public partial class MainWindow : Window
                 : wavPath is not null ? $"{UiLocalizer.T("Dinlenen kaynak:")} WAV — {Path.GetFileName(wavPath)}"
                 : UiLocalizer.T("Dinlenen kaynak: Mikrofon");
             _cancellation = new CancellationTokenSource();
-            if (liveProvider == LiveProviders.Hybrid)
+            if (liveProvider == LiveProviders.Hybrid && !transcriptionOnly)
             {
                 var targetName = SelectedLanguage(LanguageBox, "Hedef dil").Name;
                 _hybrid = new HybridTranslator(hybridKey!, targetName);
@@ -306,31 +362,26 @@ public partial class MainWindow : Window
                 };
                 _hybrid.Failed += message => Dispatcher.BeginInvoke(() => StatusText.Text = message);
             }
-            _session = LiveProviders.Create(liveProvider);
-            _session.TextChanged += segments => Dispatcher.Invoke(() =>
-            {
-                _sonioxSegments = segments;
-                _hybrid?.Observe(segments, _session?.CommittedOriginalCount ?? 0);
-                ApplySonioxSegments();
-            });
-            _session.Failed += message => Dispatcher.Invoke(() => StatusText.Text = message);
+            _session = transcriptionOnly ? LiveProviders.CreateTranscription(liveProvider) : LiveProviders.Create(liveProvider);
+            AttachSession(_session);
             StartButton.IsEnabled = false;
             PauseButton.IsEnabled = false;
             SettingsButton.IsEnabled = false;
+            ModeBox.IsEnabled = false;
             SourceBox.IsEnabled = false;
             SourceLanguageBox.IsEnabled = false;
             LanguageBox.IsEnabled = false;
             ApplicationBox.IsEnabled = false;
             IncludeMicrophoneBox.IsEnabled = false;
             StatusText.Text = UiLocalizer.T("Bağlanıyor…");
-            var language = SelectedLanguage(LanguageBox, "Hedef dil").Code;
+            var language = transcriptionOnly ? "" : SelectedLanguage(LanguageBox, "Hedef dil").Code;
             var sourceLanguage = SelectedLanguage(SourceLanguageBox, "Konuşma dili").Code;
             if (selectedProcessId is not null && IncludeMicrophoneBox.IsChecked == true)
                 sourceLanguage = ""; // Each Teams participant may speak a different language.
             _currentRecord = CreateRecord();
             _currentRecord.AudioFile = recordPath;
             if (_session is SonioxSession soniox)
-                await soniox.ConnectAsync(key, language, sourceLanguage, _cancellation.Token, _hybrid is null, _currentRecord.Id.ToString("N"));
+                await soniox.ConnectAsync(key, language, sourceLanguage, _cancellation.Token, !transcriptionOnly && _hybrid is null, _currentRecord.Id.ToString("N"));
             else await _session.ConnectAsync(key, language, sourceLanguage, _cancellation.Token);
             if (OverlayBox.IsChecked == true) ShowOverlay();
             if (wavPath is null && selectedProcessId is null)
@@ -340,8 +391,7 @@ public partial class MainWindow : Window
                 _microphone.AudioAvailable += data =>
                 {
                     if (_paused) return;
-                    _recorder?.Write(data);
-                    _session.TryQueueAudio(data);
+                    QueueAudio(data);
                 };
                 _microphone.Start();
                 StatusText.Text = UiLocalizer.T("Mikrofon dinleniyor;") + " " + liveProvider + " " + UiLocalizer.T("bağlantısı açık.");
@@ -356,25 +406,13 @@ public partial class MainWindow : Window
                     _audioMixer.AudioAvailable += data =>
                     {
                         if (_paused) return;
-                        _recorder?.Write(data);
-                        _session?.TryQueueAudio(data);
+                        QueueAudio(data);
                     };
                     _microphone = new MicrophoneCapture();
                     _microphone.AudioAvailable += data => { if (!_paused) _audioMixer?.AddMicrophone(data); };
                 }
                 _applicationAudio = new ApplicationAudioCapture();
-                _applicationAudio.AudioAvailable += data =>
-                {
-                    if (_paused) return;
-                    if (includeMicrophone) _audioMixer?.AddApplication(data);
-                    else
-                    {
-                        _recorder?.Write(data);
-                        _session?.TryQueueAudio(data);
-                    }
-                };
-                _applicationAudio.Stopped += error => Dispatcher.Invoke(() =>
-                    StatusText.Text = error is null ? UiLocalizer.T("Uygulama sesi durdu.") : UiLocalizer.T("Uygulama sesi hatası:") + " " + error.Message);
+                AttachApplicationAudio(_applicationAudio, includeMicrophone);
                 await _applicationAudio.StartAsync(selectedProcessId.Value);
                 if (includeMicrophone)
                 {
@@ -391,11 +429,14 @@ public partial class MainWindow : Window
                 _ = SendFileAsync(wavPath, _cancellation.Token);
             }
             _paused = false;
+            _recordingReady = true;
             _recordClock.Restart();
             _recordTimer.Start();
             RecordTimerText.Visibility = Visibility.Visible;
             RecordTimerText.Text = "● 00:00:00";
+            UpdateTimerBlink();
             StartButton.Content = UiLocalizer.T("Kaydı durdur");
+            StartButton.Style = (Style)FindResource("RecordStopButton");
             StartButton.IsEnabled = true;
             PauseButton.Content = UiLocalizer.T("⏸ Duraklat");
             PauseButton.IsEnabled = true;
@@ -422,21 +463,171 @@ public partial class MainWindow : Window
         catch (Exception ex) { await Dispatcher.InvokeAsync(() => ShowError(ex)); }
     }
 
-    private void PauseButton_Click(object sender, RoutedEventArgs e)
+    private void QueueAudio(byte[] data)
     {
-        if (_session is null) return;
-        _paused = !_paused;
-        _audioMixer?.SetPaused(_paused);
-        if (_paused) _recordClock.Stop(); else _recordClock.Start();
-        PauseButton.Content = UiLocalizer.T(_paused ? "▶ Devam et" : "⏸ Duraklat");
-        RecordTimerText.Text = (_paused ? "⏸ " : "● ") + _recordClock.Elapsed.ToString(@"hh\:mm\:ss");
-        StatusText.Text = UiLocalizer.T(_paused ? "Kayıt duraklatıldı." : "Kayıt devam ediyor.");
+        _recorder?.Write(data);
+        _session?.TryQueueAudio(data);
+    }
+
+    private void AttachApplicationAudio(ApplicationAudioCapture capture, bool includeMicrophone)
+    {
+        capture.AudioAvailable += data =>
+        {
+            if (_paused) return;
+            if (includeMicrophone) _audioMixer?.AddApplication(data);
+            else QueueAudio(data);
+        };
+        capture.Stopped += error => Dispatcher.BeginInvoke(() =>
+        {
+            if (_stopping) return;
+            _applicationCaptureStopped = true;
+            StatusText.Text = error is null ? UiLocalizer.T("Uygulama sesi durdu.") : UiLocalizer.T("Uygulama sesi hatası:") + " " + error.Message;
+        });
+    }
+
+    private async Task RestoreApplicationCaptureAsync()
+    {
+        if (!_applicationCaptureStopped || SourceBox.SelectedIndex != 1) return;
+        var processId = (ApplicationBox.SelectedItem as ApplicationOption)?.ProcessId
+            ?? throw new InvalidOperationException(UiLocalizer.T("Seçilen uygulama kapandı. Listeyi yenileyin."));
+        if (_applicationAudio is not null) await _applicationAudio.DisposeAsync();
+        _applicationAudio = new ApplicationAudioCapture();
+        AttachApplicationAudio(_applicationAudio, IncludeMicrophoneBox.IsChecked == true);
+        await _applicationAudio.StartAsync(processId);
+        _applicationCaptureStopped = false;
+    }
+
+    private void AttachSession(ILiveSession session)
+    {
+        session.TextChanged += segments => Dispatcher.Invoke(() =>
+        {
+            if (!ReferenceEquals(_session, session)) return;
+            _sonioxSegments = _sessionPrefix.Concat(segments.Select(x => x.Start is null
+                ? x : x with { Start = x.Start.Value + _sessionStartOffset })).ToArray();
+            _hybrid?.Observe(_sonioxSegments, _sessionPrefix.Count + session.CommittedOriginalCount);
+            ApplySonioxSegments();
+            if (!_reconnecting && !_paused && segments.Any(x => !string.IsNullOrWhiteSpace(x.Original)))
+                _consecutiveRecoveries = 0;
+        });
+        session.Failed += message => Dispatcher.BeginInvoke(new Action(async () =>
+        {
+            if (!ReferenceEquals(_session, session)) return;
+            _lastLiveError = message;
+            StatusText.Text = message;
+            if (_recordingReady && !_paused && !_stopping && !_reconnecting) await RecoverStreamAsync();
+        }));
+    }
+
+    private async void PauseButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_session is null || _reconnecting) return;
+        PauseButton.IsEnabled = false;
+        try
+        {
+            if (!_paused)
+            {
+                _paused = true;
+                _pausedAt = DateTimeOffset.UtcNow;
+                _audioMixer?.SetPaused(true);
+                _recordClock.Stop();
+                if (_session is SonioxSession soniox && soniox.IsConnected)
+                    await soniox.SetPausedAsync(true);
+                StatusText.Text = UiLocalizer.T("Kayıt duraklatıldı.");
+            }
+            else
+            {
+                var longPause = _pausedAt is { } started && DateTimeOffset.UtcNow - started > TimeSpan.FromSeconds(20);
+                if (_session is SonioxSession soniox) await soniox.SetPausedAsync(false);
+                if (!_session.IsConnected || longPause)
+                {
+                    await RecoverStreamAsync(countFailure: !_session.IsConnected);
+                    return;
+                }
+                await RestoreApplicationCaptureAsync();
+                _paused = false;
+                _pausedAt = null;
+                _audioMixer?.SetPaused(false);
+                _recordClock.Start();
+                StatusText.Text = UiLocalizer.T("Kayıt devam ediyor.");
+            }
+            PauseButton.Content = UiLocalizer.T(_paused ? "▶ Devam et" : "⏸ Duraklat");
+            RecordTimerText.Text = (_paused ? "⏸ " : "● ") + _recordClock.Elapsed.ToString(@"hh\:mm\:ss");
+            UpdateTimerBlink();
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+            await StopAsync(false);
+        }
+        finally { PauseButton.IsEnabled = _session is not null && !_stopping && !_reconnecting; }
+    }
+
+    private async Task RecoverStreamAsync(bool countFailure = true)
+    {
+        if (_reconnecting || _session is null || _stopping) return;
+        _reconnecting = true;
+        if (countFailure && ++_consecutiveRecoveries > 3)
+        {
+            ShowError(new InvalidOperationException(UiLocalizer.T("Canlı bağlantı art arda kesildi. Kaydı yeniden başlatın.") + " " + _lastLiveError));
+            await StopAsync(false);
+            _reconnecting = false;
+            return;
+        }
+        _paused = true;
+        _audioMixer?.SetPaused(true);
+        _recordClock.Stop();
+        UpdateTimerBlink();
+        StartButton.IsEnabled = false;
+        PauseButton.IsEnabled = false;
+        StatusText.Text = UiLocalizer.T("Canlı bağlantı yenileniyor…");
+        try
+        {
+            await _session.StopAsync();
+            _sessionPrefix = _sonioxSegments.ToArray();
+            _sessionStartOffset = _recordClock.Elapsed;
+            var provider = _settings.LiveProvider;
+            var key = provider is LiveProviders.Soniox or LiveProviders.Hybrid
+                ? CredentialStore.Read() ?? ""
+                : CredentialStore.ReadForProvider(LiveProviders.CredentialProvider(provider)) ?? "";
+            var sourceLanguage = (SourceLanguageBox.SelectedItem as LanguageOption)?.Code ?? "";
+            if (SourceBox.SelectedIndex == 1 && IncludeMicrophoneBox.IsChecked == true) sourceLanguage = "";
+            var targetLanguage = _settings.TranscriptionOnly ? "" : (LanguageBox.SelectedItem as LanguageOption)?.Code ?? "";
+            _session = _settings.TranscriptionOnly ? LiveProviders.CreateTranscription(provider) : LiveProviders.Create(provider);
+            AttachSession(_session);
+            if (_session is SonioxSession soniox)
+                await soniox.ConnectAsync(key, targetLanguage, sourceLanguage, _cancellation!.Token,
+                    !_settings.TranscriptionOnly && _hybrid is null, _currentRecord?.Id.ToString("N"));
+            else await _session.ConnectAsync(key, targetLanguage, sourceLanguage, _cancellation!.Token);
+            await RestoreApplicationCaptureAsync();
+            _paused = false;
+            _pausedAt = null;
+            _audioMixer?.SetPaused(false);
+            _recordClock.Start();
+            UpdateTimerBlink();
+            StatusText.Text = UiLocalizer.T("Kayıt devam ediyor.");
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+            await StopAsync(false);
+        }
+        finally
+        {
+            _reconnecting = false;
+            if (!_stopping)
+            {
+                StartButton.IsEnabled = true;
+                PauseButton.IsEnabled = _session is not null;
+                PauseButton.Content = UiLocalizer.T(_paused ? "▶ Devam et" : "⏸ Duraklat");
+            }
+        }
     }
 
     private async Task StopAsync(bool showSummary = true)
     {
         if (_stopping) return;
         _stopping = true;
+        _recordingReady = false;
         _overlay?.Close();
         StartButton.IsEnabled = false;
         PauseButton.IsEnabled = false;
@@ -456,6 +647,7 @@ public partial class MainWindow : Window
         _recorder?.Dispose();
         _recorder = null;
         _paused = false;
+        UpdateTimerBlink();
         _cancellation?.Cancel();
         if (_session is not null)
         {
@@ -494,11 +686,13 @@ public partial class MainWindow : Window
         }
         StartButton.IsEnabled = true;
         StartButton.Content = UiLocalizer.T("Kaydı başlat");
+        StartButton.Style = (Style)FindResource("RecordStartButton");
         PauseButton.Content = UiLocalizer.T("⏸ Duraklat");
         RecordTimerText.Visibility = Visibility.Collapsed;
         SettingsButton.IsEnabled = true;
+        ModeBox.IsEnabled = true;
         SourceBox.IsEnabled = true;
-        SourceLanguageBox.IsEnabled = _settings.LiveProvider is LiveProviders.Soniox or LiveProviders.Hybrid;
+        SourceLanguageBox.IsEnabled = _settings.TranscriptionOnly || _settings.LiveProvider is LiveProviders.Soniox or LiveProviders.Hybrid;
         LanguageBox.IsEnabled = true;
         ApplicationBox.IsEnabled = true;
         IncludeMicrophoneBox.IsEnabled = true;
@@ -506,6 +700,23 @@ public partial class MainWindow : Window
         if (showSummary && _segments.Any(x => !string.IsNullOrWhiteSpace(x.Original))) MainTabs.SelectedIndex = 1;
         _stopping = false;
         _ = RefreshBalancesAsync();
+    }
+
+    private void UpdateTimerBlink()
+    {
+        if (_paused && RecordTimerText.Visibility == Visibility.Visible)
+        {
+            RecordTimerText.BeginAnimation(OpacityProperty, new DoubleAnimation(1, 0.25, TimeSpan.FromMilliseconds(550))
+            {
+                AutoReverse = true,
+                RepeatBehavior = RepeatBehavior.Forever
+            });
+        }
+        else
+        {
+            RecordTimerText.BeginAnimation(OpacityProperty, null);
+            RecordTimerText.Opacity = 1;
+        }
     }
 
     private async Task RefreshSessionCostAsync(Guid id, string directory)
@@ -589,7 +800,10 @@ public partial class MainWindow : Window
     {
         TranscriptList.ItemsSource = _segments.Select(x => new TranscriptRow(
             _settings.ShowTimestamps && x.Start is not null ? $"{(int)x.Start.Value.TotalMinutes:00}:{x.Start.Value.Seconds:00}" : "",
-            x.Original, x.Translation, _settings.ShowTimestamps ? new GridLength(72) : new GridLength(0))).ToArray();
+            x.Original, _settings.TranscriptionOnly ? "" : x.Translation,
+            _settings.ShowTimestamps ? new GridLength(72) : new GridLength(0),
+            new GridLength(_settings.TranscriptionOnly ? 0 : 18),
+            _settings.TranscriptionOnly ? new GridLength(0) : new GridLength(1, GridUnitType.Star))).ToArray();
     }
 
     private void ApplySonioxSegments()
@@ -648,7 +862,7 @@ public partial class MainWindow : Window
         public string DisplayName => $"{ProcessName} — {WindowTitle} (PID {ProcessId})";
     }
 
-    private sealed record TranscriptRow(string Timestamp, string Original, string Translation, GridLength TimeWidth);
+    private sealed record TranscriptRow(string Timestamp, string Original, string Translation, GridLength TimeWidth, GridLength SpacerWidth, GridLength TranslationWidth);
 
     private SessionRecord CreateRecord() => new()
     {
@@ -657,8 +871,9 @@ public partial class MainWindow : Window
         SourceLanguage = SourceBox.SelectedIndex == 1 && IncludeMicrophoneBox.IsChecked == true
             ? "Otomatik algıla (uygulama + mikrofon)"
             : (SourceLanguageBox.SelectedItem as LanguageOption)?.Name ?? "",
-        TargetLanguage = (LanguageBox.SelectedItem as LanguageOption)?.Name ?? ""
-        ,LiveProvider = _settings.LiveProvider
+        TargetLanguage = _settings.TranscriptionOnly ? "" : (LanguageBox.SelectedItem as LanguageOption)?.Name ?? "",
+        LiveProvider = _settings.TranscriptionOnly && _settings.LiveProvider == LiveProviders.Hybrid ? LiveProviders.Soniox : _settings.LiveProvider,
+        TranscriptionOnly = _settings.TranscriptionOnly
     };
 
     private void RefreshHistory()
@@ -693,11 +908,11 @@ public partial class MainWindow : Window
         if (HistoryDetailText is null || RecordSearchBox is null || HistoryList is null) return;
         if (HistoryList.SelectedItem is not SessionRecord record) { HistoryDetailText.Text = "Kayıt seçin."; return; }
         var term = RecordSearchBox.Text.Trim();
-        var lines = new List<string> { $"{record.StartedAt.LocalDateTime:dd.MM.yyyy HH:mm:ss} – {record.EndedAt?.LocalDateTime.ToString("dd.MM.yyyy HH:mm:ss") ?? "Devam ediyor"}", record.Source, $"{record.SourceLanguage} → {record.TargetLanguage}", "" };
+        var lines = new List<string> { $"{record.StartedAt.LocalDateTime:dd.MM.yyyy HH:mm:ss} – {record.EndedAt?.LocalDateTime.ToString("dd.MM.yyyy HH:mm:ss") ?? "Devam ediyor"}", record.Source, record.TranscriptionOnly ? UiLocalizer.T("Transkripsiyon") + " · " + record.SourceLanguage : $"{record.SourceLanguage} → {record.TargetLanguage}", "" };
         foreach (var segment in record.Segments.Where(x => term.Length == 0 || x.Original.Contains(term, StringComparison.CurrentCultureIgnoreCase) || x.Translation.Contains(term, StringComparison.CurrentCultureIgnoreCase)))
         {
             lines.Add($"[{(segment.Start is null ? "--:--" : $"{(int)segment.Start.Value.TotalMinutes:00}:{segment.Start.Value.Seconds:00}")}] {segment.Original}");
-            lines.Add(segment.Translation);
+            if (!record.TranscriptionOnly) lines.Add(segment.Translation);
             lines.Add("");
         }
         foreach (var summary in record.Summaries.Where(x => term.Length == 0 || x.Text.Contains(term, StringComparison.CurrentCultureIgnoreCase)))
@@ -736,13 +951,21 @@ public partial class MainWindow : Window
                 FilterIndex = 1, AddExtension = true, FileName = $"translator-{DateTime.Now:yyyyMMdd-HHmm}"
             };
             if (picker.ShowDialog() != true) return;
-            var markdown = new StringBuilder($"# RecapVox oturumu\n\nTarih: {DateTime.Now:yyyy-MM-dd HH:mm}\n\nKaynak: {SourceInfoText.Text}\n\nÇeviri eşleşmesi konuşma sırasına göredir; cümleler bire bir hizalı olmayabilir.\n");
+            var transcriptionOnly = _currentRecord?.TranscriptionOnly ?? _settings.TranscriptionOnly;
+            var markdown = new StringBuilder($"# RecapVox oturumu\n\nTarih: {DateTime.Now:yyyy-MM-dd HH:mm}\n\nKaynak: {SourceInfoText.Text}\n\n");
+            if (!transcriptionOnly) markdown.Append("Çeviri eşleşmesi konuşma sırasına göredir; cümleler bire bir hizalı olmayabilir.\n");
             var plain = new StringBuilder($"RecapVox oturumu\nTarih: {DateTime.Now:yyyy-MM-dd HH:mm}\nKaynak: {SourceInfoText.Text}\n\n");
             foreach (var segment in _segments)
             {
                 var time = segment.Start is null ? "--:--" : $"{(int)segment.Start.Value.TotalMinutes:00}:{segment.Start.Value.Seconds:00}";
-                markdown.Append($"\n### {time}\n\n**Orijinal:** {segment.Original}\n\n**Çeviri:** {segment.Translation}\n");
-                plain.Append($"[{time}] Orijinal: {segment.Original}\nÇeviri: {segment.Translation}\n\n");
+                markdown.Append($"\n### {time}\n\n**Orijinal:** {segment.Original}\n");
+                plain.Append($"[{time}] Orijinal: {segment.Original}\n");
+                if (!transcriptionOnly)
+                {
+                    markdown.Append($"\n**Çeviri:** {segment.Translation}\n");
+                    plain.Append($"Çeviri: {segment.Translation}\n");
+                }
+                plain.Append('\n');
             }
             if (!string.IsNullOrWhiteSpace(SummaryText.Text))
             {

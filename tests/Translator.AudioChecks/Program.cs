@@ -6,6 +6,59 @@ using System.IO;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Reflection;
+
+foreach (var provider in new[] { LiveProviders.Soniox, LiveProviders.Hybrid, LiveProviders.OpenAi, LiveProviders.Gemini })
+{
+    var session = LiveProviders.CreateTranscription(provider);
+    var expected = provider switch
+    {
+        LiveProviders.OpenAi => typeof(OpenAiTranscriptionSession),
+        LiveProviders.Gemini => typeof(GeminiTranscriptionSession),
+        _ => typeof(SonioxSession)
+    };
+    if (session.GetType() != expected) throw new Exception("Transkripsiyon sağlayıcısı yanlış seçildi: " + provider);
+}
+var inactiveSoniox = new SonioxSession();
+if (inactiveSoniox.IsConnected || inactiveSoniox.TryQueueAudio(new byte[3200]))
+    throw new Exception("Kapanmış Soniox bağlantısı sesi kabul ediyor gibi görünüyor.");
+await inactiveSoniox.StopAsync();
+var inactiveOpenAi = new OpenAiTranscriptionSession();
+if (inactiveOpenAi.IsConnected || inactiveOpenAi.TryQueueAudio(new byte[3200]))
+    throw new Exception("Kapanmış Realtime bağlantısı sesi kabul ediyor gibi görünüyor.");
+await inactiveOpenAi.StopAsync();
+
+static string Setup(RealtimeWebSocketSession session) => (string)session.GetType()
+    .GetMethod("SetupMessage", BindingFlags.Instance | BindingFlags.NonPublic)!
+    .Invoke(session, ["", "en"])!;
+using (var openAiConfig = JsonDocument.Parse(Setup(new OpenAiTranscriptionSession())))
+{
+    var config = openAiConfig.RootElement.GetProperty("session");
+    if (config.GetProperty("type").GetString() != "transcription"
+        || config.GetProperty("audio").GetProperty("input").GetProperty("transcription").GetProperty("model").GetString() != "gpt-live-transcribe")
+        throw new Exception("OpenAI yalnız transkripsiyon yapılandırması yanlış.");
+}
+using (var geminiConfig = JsonDocument.Parse(Setup(new GeminiTranscriptionSession())))
+{
+    var setup = geminiConfig.RootElement.GetProperty("setup");
+    if (setup.GetProperty("model").GetString() != "models/gemini-3.5-transcribe-live"
+        || setup.GetProperty("generationConfig").GetProperty("responseModalities")[0].GetString() != "TEXT"
+        || setup.TryGetProperty("translationConfig", out _))
+        throw new Exception("Gemini yalnız transkripsiyon yapılandırması yanlış.");
+}
+var openAiTranscription = new OpenAiTranscriptionSession();
+IReadOnlyList<TranscriptSegment> lastTranscript = [];
+openAiTranscription.TextChanged += segments => lastTranscript = segments;
+openAiTranscription.ProcessServerMessage("{\"type\":\"conversation.item.input_audio_transcription.delta\",\"item_id\":\"1\",\"delta\":\"Hello.\"}");
+openAiTranscription.ProcessServerMessage("{\"type\":\"conversation.item.input_audio_transcription.completed\",\"item_id\":\"1\",\"transcript\":\"Hello.\"}");
+if (lastTranscript.Count != 1 || lastTranscript[0].Original != "Hello." || lastTranscript[0].Translation != "")
+    throw new Exception("OpenAI konuşması yinelendi veya çeviri üretildi.");
+var geminiTranscription = new GeminiTranscriptionSession();
+geminiTranscription.TextChanged += segments => lastTranscript = segments;
+geminiTranscription.ProcessServerMessage("{\"serverContent\":{\"inputTranscription\":{\"text\":\"Welcome.\"}}}");
+if (lastTranscript.Count != 1 || lastTranscript[0].Original != "Welcome." || lastTranscript[0].Translation != "")
+    throw new Exception("Gemini transkripsiyon metni ayrıştırılamadı.");
+Console.WriteLine("Üç canlı sağlayıcının transkripsiyon yapılandırması ve metin akışı doğrulandı.");
 
 Exception? uiError = null;
 var uiThread = new Thread(() =>
@@ -50,14 +103,15 @@ Console.WriteLine("DeepSeek bakiye ve Soniox kayıt maliyeti ayrıştırıldı."
 var archiveTestDirectory = Path.Combine(Path.GetTempPath(), "translator-cost-check-" + Guid.NewGuid().ToString("N"));
 try
 {
-    var priced = new SessionRecord { StartedAt = DateTimeOffset.UtcNow, LiveCostUsd = 0.0123m,
+    var priced = new SessionRecord { StartedAt = DateTimeOffset.UtcNow, TranscriptionOnly = true, LiveProvider = LiveProviders.OpenAi, LiveCostUsd = 0.0123m,
         HybridCostEstimateUsd = 0.0002m, LiveCostStatus = "Soniox kesin tutar" };
     ArchiveStore.SaveSession(archiveTestDirectory, priced);
-    var stale = new SessionRecord { Id = priced.Id, StartedAt = priced.StartedAt,
+    var stale = new SessionRecord { Id = priced.Id, StartedAt = priced.StartedAt, TranscriptionOnly = true, LiveProvider = LiveProviders.OpenAi,
         LiveCostStatus = "Soniox maliyeti sorgulanıyor" };
     ArchiveStore.SaveSession(archiveTestDirectory, stale);
     var reloaded = ArchiveStore.LoadSessions(archiveTestDirectory).Single();
-    if (reloaded.LiveCostUsd != priced.LiveCostUsd ||
+    if (!reloaded.TranscriptionOnly || reloaded.LiveProvider != LiveProviders.OpenAi ||
+        reloaded.LiveCostUsd != priced.LiveCostUsd ||
         reloaded.HybridCostEstimateUsd != priced.HybridCostEstimateUsd ||
         reloaded.LiveCostStatus != priced.LiveCostStatus)
         throw new Exception("Kaydedilmiş oturum maliyeti yeniden yazılınca kayboldu.");
@@ -120,6 +174,39 @@ var longSpeech = new[] { new TranscriptSegment(null, string.Join(" ", Enumerable
 if (!OverlayText.Current(longSpeech).Original.StartsWith("word45") || OverlayText.Current(longSpeech).Original.Contains("word1 "))
     throw new Exception("Uzun konuşma sabit boylu bloklara ayrılamadı.");
 Console.WriteLine("Yüzen altyazı güncel cümle seçimi doğrulandı.");
+var compactChunks = OverlayText.Chunks([new TranscriptSegment(null,
+    "One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen.", "")], false);
+if (compactChunks.Count != 2 || compactChunks[0].Split(' ').Length != 9 || compactChunks[1].Split(' ').Length != 9)
+    throw new Exception("Uzun altyazı kısa parçalara bölünmedi.");
+var wideChunks = OverlayText.Chunks([new TranscriptSegment(null,
+    "One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty", "")], false, 18);
+if (wideChunks.Count != 2 || wideChunks[0].Split(' ').Length != 18)
+    throw new Exception("Pencere genişlediğinde altyazı metni de genişlemedi.");
+var joinedSentences = OverlayText.Chunks([
+    new TranscriptSegment(null, "A short sentence.", ""),
+    new TranscriptSegment(null, "Another brief sentence follows.", "")], false, 18);
+if (joinedSentences.Count != 1 || !joinedSentences[0].Contains("Another brief sentence"))
+    throw new Exception("Geniş altyazı penceresinde kısa cümleler birlikte yerleşmedi.");
+var captionFlow = new OverlayCaptionStream();
+captionFlow.Update([]);
+captionFlow.Update(compactChunks);
+if (captionFlow.VisibleText != compactChunks[0] || !captionFlow.HasPending)
+    throw new Exception("Altyazı parçaları bir anda gösterildi.");
+captionFlow.Advance();
+if (captionFlow.VisibleText != string.Join("\n", compactChunks) || captionFlow.HasPending)
+    throw new Exception("Altyazı ikinci parçaya kayarak ilerlemedi.");
+captionFlow.Update([.. compactChunks, "A new short piece."]);
+if (captionFlow.VisibleText.Contains("A new short piece."))
+    throw new Exception("Yeni altyazı beklemeden aniden gösterildi.");
+captionFlow.Advance();
+if (captionFlow.VisibleText.Contains(compactChunks[0]) || !captionFlow.VisibleText.Contains("A new short piece."))
+    throw new Exception("Eski altyazı yumuşak geçiş için kuyruktan çıkarılmadı.");
+var translationFlow = new OverlayCaptionStream();
+translationFlow.Update(["Önceki çeviri."]);
+translationFlow.Update(["Önceki çeviri."]);
+translationFlow.Update([]);
+if (translationFlow.VisibleText != "Önceki çeviri.") throw new Exception("Çeviri yenisi gelene kadar korunmadı.");
+Console.WriteLine("Kısa altyazı blokları ve sıralı geçiş doğrulandı.");
 var cleanSummaryPrompt = SummaryClient.BuildSummaryPrompt("Toplantı", false, "Türkçe",
     [new TranscriptSegment(TimeSpan.FromSeconds(5), "Karar alındı.", "A decision was made.")]);
 if (cleanSummaryPrompt.Contains("00:05") || cleanSummaryPrompt.Contains("[1 @") || !cleanSummaryPrompt.Contains("Karar alındı."))

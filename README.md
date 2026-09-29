@@ -2,6 +2,8 @@
 
 **Live translation, audio recording, and AI meeting summaries for Windows 11.**
 
+RecapVox 1.1.0 adds a main-window switch between **Live translation** and **Transcription only**. In transcription mode, Soniox, OpenAI, and Gemini can produce the original speech text without translation. If the hybrid method is selected, Soniox transcribes and DeepSeek is not called. Transcripts can still be saved, searched, exported, and summarized.
+
 RecapVox listens to your microphone, a selected Windows application's audio, or a 16 kHz PCM WAV file. It displays original speech and translation in paired, timestamped blocks, can record audio, and saves searchable sessions with optional AI summaries. The Windows 11 x64 single-file EXE includes a stable .NET 10 runtime.
 
 ![RecapVox logo](assets/recapvox-logo.png)
@@ -14,17 +16,23 @@ RecapVox listens to your microphone, a selected Windows application's audio, or 
 
 [Open the full-size main window image](docs/screenshots/recapvox-main-en.png)
 
+### Transcription-only window
+
+![RecapVox transcription-only main window in English](docs/screenshots/recapvox-transcription-en.png)
+
+[Open the full-size transcription window image](docs/screenshots/recapvox-transcription-en.png)
+
 ### Session summary window
 
 ![RecapVox session summary window in English](docs/screenshots/recapvox-summary-en.png)
 
 [Open the full-size session summary image](docs/screenshots/recapvox-summary-en.png)
 
-Account balances are hidden in both screenshots.
+The screenshots show the running English interface. Provider balances vary by account and capture time.
 
 ## Download and start
 
-Download **RecapVox-win-x64-1.0.2.exe** from the [v1.0.2 release](https://github.com/ercanturhan/recapvox-live-translation-notes/releases/tag/v1.0.2) and double-click it. No separate .NET installation is needed. On first launch, the launcher extracts its private runtime to `%LOCALAPPDATA%\RecapVox\R`; later launches reuse that cache. An internet connection and your own provider API key are required for live translation and AI summaries. The EXE is currently unsigned, so Windows may show a publisher warning.
+Download **RecapVox-win-x64-1.1.0.exe** from the [v1.1.0 release](https://github.com/ercanturhan/recapvox-live-translation-notes/releases/tag/v1.1.0) and double-click it. No separate .NET installation is needed. On first launch, the launcher extracts its private runtime to `%LOCALAPPDATA%\RecapVox\R`; later launches reuse that cache. An internet connection and your own provider API key are required for transcription, live translation, and AI summaries. The EXE is currently unsigned, so Windows may show a publisher warning.
 
 The download contains no API keys, recordings, or personal settings. Keys are stored in Windows Credential Manager for your Windows account. Moving the EXE to another folder on the **same** account does not remove existing keys; sharing the EXE does not share your keys.
 
@@ -33,6 +41,7 @@ The download contains no API keys, recordings, or personal settings. Keys are st
 | Area | What RecapVox offers |
 | --- | --- |
 | Live text | Original speech and translation in ordered sentence blocks. Show or hide timestamps without removing them from the saved session. |
+| Transcription only | Original speech without translation. Soniox uses its STT WebSocket without translation; OpenAI uses `gpt-live-transcribe`; Gemini uses `gemini-3.5-transcribe-live`. The same audio sources, recording, history, exports, and AI summaries remain available. |
 | Audio sources | Microphone, one selected Windows application (including child processes), or a 16 kHz mono 16-bit PCM WAV file. Application audio and microphone can be mixed for meetings. Capture is application-level, not individual browser-tab capture. |
 | Recording | Start, stop, pause, and resume; a timer pauses with the session. Optionally save the captured audio as WAV. |
 | Floating subtitles | Show original text, translation, or both; choose side-by-side or stacked layout, window width, and font size from the `⋯` button beside **Floating subtitles**. Captions close when recording stops. |
@@ -80,7 +89,7 @@ Install the stable [.NET 10 SDK](https://dotnet.microsoft.com/en-us/download/dot
 ```powershell
 ./run.ps1
 # Build a single-file distribution:
-./scripts/package-single-exe.ps1 -Version 1.0.2
+./scripts/package-single-exe.ps1 -Version 1.1.0
 # Run automated checks:
 ./.dotnet-sdk/dotnet.exe run --project tests/Translator.AudioChecks/Translator.AudioChecks.csproj
 ```

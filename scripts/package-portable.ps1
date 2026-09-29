@@ -62,14 +62,14 @@ set "DOTNET_ROOT=%~dp0runtime"
 
 @'
 RecapVox — Portable Windows x64
-Live translation · Audio recording · AI summaries
+Live translation · Transcription · Audio recording · AI summaries
 
 Extract the ZIP completely, then double-click RecapVox.cmd. No separate .NET installation is required.
-Windows 11 x64 is required. Internet and your own provider API key are needed for live translation and AI summaries.
+Windows 11 x64 is required. Internet and your own provider API key are needed for transcription, live translation and AI summaries.
 Settings and recordings are saved under your Windows user profile; the ZIP contains no API keys or personal recordings.
 
 ZIP dosyasını tamamen çıkarın ve RecapVox.cmd dosyasına çift tıklayın.
-Ayrıca .NET kurulumu gerekmez. Canlı çeviri ve özet için internet ve kendi API anahtarınız gerekir.
+Ayrıca .NET kurulumu gerekmez. Transkripsiyon, canlı çeviri ve özet için internet ve kendi API anahtarınız gerekir.
 Bu pakette API anahtarı, kişisel kayıt veya konuşma bulunmaz.
 '@ | Set-Content -LiteralPath (Join-Path $packageRoot 'README.txt') -Encoding UTF8
 

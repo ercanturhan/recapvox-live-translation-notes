@@ -5,6 +5,7 @@ internal interface ILiveSession
     event Action<IReadOnlyList<TranscriptSegment>>? TextChanged;
     event Action<string>? Failed;
     int CommittedOriginalCount { get; }
+    bool IsConnected { get; }
     Task ConnectAsync(string key, string targetLanguage, string? sourceLanguage, CancellationToken cancellation);
     bool TryQueueAudio(byte[] data);
     Task StopAsync();
@@ -32,5 +33,13 @@ internal static class LiveProviders
         OpenAi => new OpenAiTranslationSession(),
         Gemini => new GeminiTranslationSession(),
         _ => throw new ArgumentException("Bilinmeyen canlı çeviri sağlayıcısı.", nameof(liveProvider))
+    };
+
+    public static ILiveSession CreateTranscription(string liveProvider) => liveProvider switch
+    {
+        Soniox or Hybrid => new SonioxSession(),
+        OpenAi => new OpenAiTranscriptionSession(),
+        Gemini => new GeminiTranscriptionSession(),
+        _ => throw new ArgumentException("Bilinmeyen transkripsiyon sağlayıcısı.", nameof(liveProvider))
     };
 }

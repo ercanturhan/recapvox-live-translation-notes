@@ -24,12 +24,14 @@ internal abstract class RealtimeWebSocketSession : ILiveSession
     public event Action<IReadOnlyList<TranscriptSegment>>? TextChanged;
     public event Action<string>? Failed;
     public int CommittedOriginalCount => _transcript.CommittedOriginalCount;
+    public bool IsConnected => _socket.State == WebSocketState.Open && _receiveTask?.IsCompleted == false && _sendTask?.IsCompleted == false;
     protected TimeSpan Elapsed => _elapsed.Elapsed;
     protected abstract string ProviderName { get; }
     protected abstract Uri Endpoint(string key);
     protected abstract void ConfigureSocket(ClientWebSocketOptions options, string key);
     protected abstract string SetupMessage(string targetLanguage, string? sourceLanguage);
     protected abstract string AudioMessage(byte[] pcm16);
+    protected virtual string? AfterAudioChunk(byte[] pcm16) => null;
     protected abstract string? FinishMessage { get; }
     protected abstract bool IsReady(JsonElement message);
     protected virtual bool IsFinished(JsonElement message) => false;
@@ -58,14 +60,18 @@ internal abstract class RealtimeWebSocketSession : ILiveSession
         }
     }
 
-    public bool TryQueueAudio(byte[] data) => _audio.Writer.TryWrite(data);
+    public bool TryQueueAudio(byte[] data) => IsConnected && _audio.Writer.TryWrite(data);
 
     private async Task SendLoopAsync()
     {
         try
         {
             await foreach (var data in _audio.Reader.ReadAllAsync())
+            {
                 await SendTextAsync(AudioMessage(data), CancellationToken.None);
+                if (AfterAudioChunk(data) is { } followUp)
+                    await SendTextAsync(followUp, CancellationToken.None);
+            }
             if (_socket.State == WebSocketState.Open && FinishMessage is { } final)
                 await SendTextAsync(final, CancellationToken.None);
         }
@@ -108,7 +114,7 @@ internal abstract class RealtimeWebSocketSession : ILiveSession
             var detail = ProviderName + ": " + Clean(error);
             _ready.TrySetException(new InvalidOperationException(detail));
             Failed?.Invoke(detail);
-            return false;
+            return true;
         }
         if (IsReady(root)) _ready.TrySetResult();
         HandleContent(root);
