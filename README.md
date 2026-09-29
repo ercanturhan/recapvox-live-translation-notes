@@ -6,9 +6,21 @@ RecapVox listens to your microphone, a selected Windows application's audio, or 
 
 ![RecapVox logo](assets/recapvox-logo.png)
 
-![RecapVox main window; account balance redacted](docs/screenshots/main-window.png)
+## Screenshots
 
-![RecapVox session summary tab; account balance redacted](docs/screenshots/session-summary.png)
+### Live translation window
+
+![RecapVox live translation main window in English](docs/screenshots/recapvox-main-en.png)
+
+[Open the full-size main window image](docs/screenshots/recapvox-main-en.png)
+
+### Session summary window
+
+![RecapVox session summary window in English](docs/screenshots/recapvox-summary-en.png)
+
+[Open the full-size session summary image](docs/screenshots/recapvox-summary-en.png)
+
+Account balances are hidden in both screenshots.
 
 ## Download and start
 
